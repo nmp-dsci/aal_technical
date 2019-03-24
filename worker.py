@@ -5,17 +5,18 @@ b) What could the hospital system do with this information?
 
 Steps taken in the code below
     1. data processing: clean dataset 
-
+    2. apply a model and interpret the top factors
 
 
 """
-
 
 import pandas as pd
 import numpy as np
 import re,time,os
 import time,datetime,math
 import json
+from sklearn.ensemble import RandomForestClassifier,GradientBoostingClassifier
+
 
 pd.options.display.max_columns = 100
 
@@ -84,9 +85,6 @@ assert clean_df.isnull().sum().sum() == 0, "ERROR for Dummy treatment, letting t
 ####################################################
 # STEP 2: modelling for most important factors to 'readmitted' patients
 ## Build column format for 
-from sklearn.ensemble import RandomForestClassifier,GradientBoostingClassifier
-
-
 
 ## column definition
 column_df = pd.DataFrame({'column':list(clean_df.columns.values)})
@@ -102,7 +100,6 @@ clean_df['train'] = clean_df.runif.apply(lambda x: 1 if x < 0.8 else 0)
 
 
 ## train model for variable importance
-
 rf = RandomForestClassifier(n_estimators=1000, max_depth=5,random_state=0,min_samples_split=50,verbose=1)
 gbm = GradientBoostingClassifier(loss='deviance', learning_rate=0.1, n_estimators=100, subsample=1.0,
     criterion='friedman_mse', min_samples_split=2, min_samples_leaf=1, min_weight_fraction_leaf=0.0,
@@ -131,7 +128,7 @@ for classifier in ['rf','gbm']:
 
 
 
-## importance
+## importance: view this and pull out predictors to investigate
 importance_df.sort_values('rf_rank',ascending=True).head(20)
 importance_df.sort_values('gbm_rank',ascending=True).head(20)
 
@@ -145,26 +142,91 @@ df[response].value_counts(normalize=True)
 var = 'number_inpatient'
 pd.concat([pd.crosstab(df[var], df[response],normalize='index'),df[var].value_counts()],axis=1)
 
+# view precision and efficiency
+pd.crosstab(df[var].apply(lambda x: 1 if x >=1 else 0 ),df[response],normalize='index')
+pd.crosstab(df[var].apply(lambda x: 1 if x >=1 else 0 ),df[response],normalize='columns')
+
+
+df[var+'_rule'] = df[var].apply(lambda x: 1 if x >=1 else 0 )
+
 #number_diagnoses
 var = 'number_diagnoses'
 pd.concat([pd.crosstab(df[var], df[response],normalize='index'),df[var].value_counts()],axis=1)
 
+# view precision and efficiency
+pd.crosstab(df[var].apply(lambda x: 1 if x <=5 else 0 ),df[response],normalize='index')
+pd.crosstab(df[var].apply(lambda x: 1 if x <=5 else 0 ),df[response],normalize='columns')
+
+df[var+'_rule'] = df[var].apply(lambda x: 1 if x <=5 else 0 )
+
 #number_outpatient
 var = 'number_outpatient'
-cuts = 7
+cuts = 14
 pd.concat([pd.crosstab(pd.cut(df[var],cuts), df[response],normalize='index'),pd.cut(df[var],cuts).value_counts()],axis=1)
+pd.concat([pd.crosstab(df[var], df[response],normalize='index'),df[var].value_counts()],axis=1)
+
+pd.crosstab(df[var].apply(lambda x: 1 if x <=5 else 0 ),df[response],normalize='index')
+
+
+
 
 #num_medications [numeric variable]
 var = 'num_medications'
+cut =17
+pd.concat([pd.crosstab(pd.cut(df[var],cut), df[response],normalize='index'),pd.cut(df[var],cut).value_counts()],axis=1)
 
-pd.concat([pd.crosstab(pd.cut(df[var],10), df[response],normalize='index'),pd.cut(df[var],10).value_counts()],axis=1)
+pd.crosstab(df[var].apply(lambda x: 1 if x <=7 else 0 ),df[response],normalize='index')
+df[var].apply(lambda x: 1 if x <=7 else 0 ).value_counts()
+
+df[var+'_rule'] = df[var].apply(lambda x: 1 if x <=7 else 0 )
+
+#num_lab_procedures
+var = 'num_lab_procedures'
+pd.concat([pd.crosstab(df[var], df[response],normalize='index'),df[var].value_counts()],axis=1)
+
+cuts = 20
+pd.concat([pd.crosstab(pd.cut(df[var],cuts), df[response],normalize='index'),pd.cut(df[var],cuts).value_counts()],axis=1)
+
+
+# view precision and efficiency
+pd.crosstab(df[var].apply(lambda x: 1 if x >=60 else 0 ),df[response],normalize='index')
+pd.crosstab(df[var].apply(lambda x: 1 if x >=60 else 0 ),df[response],normalize='columns')
+
+df[var+'_rule'] = df[var].apply(lambda x: 1 if x >=60 else 0 )
 
 
 #number_outpatient
 var = 'discharge_disposition_id'
-levels = ['expired','to','discharged',]
-pd.concat([pd.crosstab(df[var], df[response],normalize='index'),df[var].value_counts()],axis=1)
+levels = ['expired','to','discharged']
+pd.concat([pd.crosstab(df[var], df[response],normalize='index'),df[var].value_counts()],axis=1).drop(False,axis=1)
+
+df[var][df[var].fillna('').str.contains('Expired')].value_counts()### Expired
+df[var][df[var].fillna('').str.lower().str.contains('discharged')].value_counts()### Expired
+
+var1 = 'discharge_disposition_id__expired'
+pd.concat([pd.crosstab(clean_df[var1], clean_df[response],normalize='index'),clean_df[var1].value_counts()],axis=1)
 
 
+################################################
+## predictors of focus [QUESTION 1: input data]
+
+top_preds = pd.Series(['num_lab_procedures','number_inpatient','number_diagnoses','num_medications'])
+top_preds_l = list(top_preds+'_rule')
+
+
+## get penetration of top pedictors into the RESPONSE
+pd.crosstab(df[top_preds_l].max(axis=1),df[response],normalize='columns')
+
+for col_rule in top_preds_l:
+    print(col_rule)
+    print(pd.crosstab(df[col_rule],df[response],normalize='index'))
+
+
+
+##############################################
+## 
+
+aaa = df.groupby(top_preds_l).agg({response:[np.mean,len]}).reset_index()
+aaa.columns = ['lab','inpatient','diagnoses','meds','_%','_#']
 
 
